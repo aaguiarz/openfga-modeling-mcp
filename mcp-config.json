@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "openfga-modeling": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "cwd": "/Users/andres.aguiar/mcp-server"
+    }
+  }
+}
