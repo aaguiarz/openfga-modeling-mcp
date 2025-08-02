@@ -589,7 +589,7 @@ contents:
   - module-2.fga
 ```
 
-'core.fga' would have types that are shared across modules. In general you'd have types as "organization", "group", "roles".
+'core.fga' would have types that are shared across modules. In general you'd have types as "organization", "group", "roles". 
 
 Each module will have the types specific to that module's functionality. They look like this:
 
@@ -606,7 +606,17 @@ type project
     define viewer: member from organization
 ```
 
-Note that you can 'extend' types that are defined in other modules and add relations to them. 
+The test files need to point to the 'fga.mod' file:
+
+```
+name: Document Management System Authorization Model Tests
+model_file: ./fga.mod
+tuples: ...
+```
+
+Note that:
+- You can 'extend' types that are defined in other modules and add relations to them. 
+- All .fga files now start with 'module <module name>' even the 'core' module. They do not start with schema declaration, that's in the `fga.mod` file.
 
 IMPORTANT: If the model that you are creating has more than 8 types, and they belong to different application areas, always create separate modules. Do not create a single model file.
 

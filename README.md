@@ -24,12 +24,16 @@ Add this configuration to your VS Code MCP settings:
 ```
 
 ### 2. **Start Using**
-Just mention OpenFGA concepts in your questions:
+
+Some possible prompts:
+
 ```
-"How do I create an OpenFGA authorization model?"
-"Design ReBAC patterns with OpenFGA"
-"What are OpenFGA relationship tuples?"
-"Help me with Zanzibar-style permissions"
+"Create an authorization model for a document management system"
+"Create an authorization model for <Company Name>"
+"Create an authorization model for <Website>"
+"Add support for custom roles"
+"Add support for temporary access at the document level"
+"Split the model in modular models"
 ```
 
 The server automatically provides expert context - no `@mcp` calls needed!
