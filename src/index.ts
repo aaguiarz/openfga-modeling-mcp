@@ -194,8 +194,11 @@ class PromptContextServer {
 
   async run() {
     // Detect environment - use HTTP for Railway/production, STDIO for local development
-    const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
+    // Railway sets PORT environment variable, so use that as primary detection
+    const isProduction = process.env.PORT || process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
     const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+    
+    console.error(`Environment detection: isProduction=${isProduction}, PORT=${process.env.PORT}, NODE_ENV=${process.env.NODE_ENV}, RAILWAY_ENVIRONMENT=${process.env.RAILWAY_ENVIRONMENT}`);
     
     if (isProduction) {
       // HTTP server for Railway deployment
@@ -206,66 +209,90 @@ class PromptContextServer {
       
       // Create HTTP server with basic routing and MCP API endpoints
       const httpServer = createServer(async (req, res) => {
-        // Enable CORS
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-        
-        if (req.method === 'OPTIONS') {
-          res.writeHead(200);
-          res.end();
-          return;
-        }
-        
-        if (req.url === '/health' || req.url === '/') {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            status: 'healthy',
-            service: 'OpenFGA Modeling MCP Server',
-            version: '1.0.0',
-            description: 'Specialized MCP server for OpenFGA authorization modeling',
-            timestamp: new Date().toISOString(),
-            capabilities: ['tools'],
-            tools: ['get_context_for_query', 'list_available_contexts']
-          }));
-          return;
-        }
-        
-        if (req.url === '/tools' && req.method === 'POST') {
-          let body = '';
-          req.on('data', chunk => body += chunk);
-          req.on('end', async () => {
-            try {
-              const request = JSON.parse(body);
-              let response;
-              
-              if (request.method === 'tools/list') {
-                response = await this.handleListTools();
-              } else if (request.method === 'tools/call') {
-                response = await this.handleCallTool(request.params);
-              } else {
-                response = { error: 'Unknown method' };
+        try {
+          // Enable CORS
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+          
+          if (req.method === 'OPTIONS') {
+            res.writeHead(200);
+            res.end();
+            return;
+          }
+          
+          if (req.url === '/health' || req.url === '/') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              status: 'healthy',
+              service: 'OpenFGA Modeling MCP Server',
+              version: '1.0.0',
+              description: 'Specialized MCP server for OpenFGA authorization modeling',
+              timestamp: new Date().toISOString(),
+              capabilities: ['tools'],
+              tools: ['get_context_for_query', 'list_available_contexts'],
+              environment: {
+                isProduction,
+                port,
+                nodeVersion: process.version,
+                platform: process.platform
               }
-              
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify(response));
-            } catch (error) {
-              res.writeHead(400, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'Invalid JSON' }));
-            }
-          });
-          return;
+            }));
+            return;
+          }
+          
+          if (req.url === '/tools' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', async () => {
+              try {
+                const request = JSON.parse(body);
+                let response;
+                
+                if (request.method === 'tools/list') {
+                  response = await this.handleListTools();
+                } else if (request.method === 'tools/call') {
+                  response = await this.handleCallTool(request.params);
+                } else {
+                  response = { error: 'Unknown method' };
+                }
+                
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(response));
+              } catch (error) {
+                console.error('Error processing tools request:', error);
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Invalid JSON' }));
+              }
+            });
+            return;
+          }
+          
+          // 404 for other routes
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ 
+            error: 'Not found',
+            message: 'Available endpoints: /, /health, /tools (POST)'
+          }));
+        } catch (error) {
+          console.error('HTTP Request Error:', error);
+          try {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Internal server error' }));
+          } catch (e) {
+            // If we can't even send an error response, log it
+            console.error('Failed to send error response:', e);
+          }
         }
-        
-        // 404 for other routes
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-          error: 'Not found',
-          message: 'Available endpoints: /, /health, /tools (POST)'
-        }));
       });
       
       // Start listening on the port
+      httpServer.on('error', (error) => {
+        this.logger.error('HTTP Server Error', error);
+        console.error('HTTP Server Error:', error);
+        process.exit(1);
+      });
+
       httpServer.listen(port, '0.0.0.0', () => {
         this.logger.logServerEvent('HTTP server started successfully', {
           transport: 'http',
