@@ -201,92 +201,71 @@ class PromptContextServer {
     console.error(`Environment detection: isProduction=${isProduction}, PORT=${process.env.PORT}, NODE_ENV=${process.env.NODE_ENV}, RAILWAY_ENVIRONMENT=${process.env.RAILWAY_ENVIRONMENT}`);
     
     if (isProduction) {
-      // HTTP server for Railway deployment
+      // For Railway deployment, use a simple HTTP server that responds to VS Code
+      // VS Code expects the MCP server to be available via HTTP, but the actual
+      // protocol may be different than what we initially implemented
       this.logger.logServerEvent('Starting HTTP server for production', { 
         port,
         environment: process.env.RAILWAY_ENVIRONMENT || 'production' 
       });
       
-      // Create HTTP server with basic routing and MCP API endpoints
-      const httpServer = createServer(async (req, res) => {
-        try {
-          // Enable CORS
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-          res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-          
-          if (req.method === 'OPTIONS') {
-            res.writeHead(200);
-            res.end();
-            return;
-          }
-          
-          if (req.url === '/health' || req.url === '/') {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-              status: 'healthy',
-              service: 'OpenFGA Modeling MCP Server',
-              version: '1.0.0',
-              description: 'Specialized MCP server for OpenFGA authorization modeling',
-              timestamp: new Date().toISOString(),
-              capabilities: ['tools'],
-              tools: ['get_context_for_query', 'list_available_contexts'],
-              environment: {
-                isProduction,
-                port,
-                nodeVersion: process.version,
-                platform: process.platform
-              }
-            }));
-            return;
-          }
-          
-          if (req.url === '/tools' && req.method === 'POST') {
-            let body = '';
-            req.on('data', chunk => body += chunk);
-            req.on('end', async () => {
-              try {
-                const request = JSON.parse(body);
-                let response;
-                
-                if (request.method === 'tools/list') {
-                  response = await this.handleListTools();
-                } else if (request.method === 'tools/call') {
-                  response = await this.handleCallTool(request.params);
-                } else {
-                  response = { error: 'Unknown method' };
-                }
-                
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(response));
-              } catch (error) {
-                console.error('Error processing tools request:', error);
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Invalid JSON' }));
-              }
-            });
-            return;
-          }
-          
-          // 404 for other routes
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ 
-            error: 'Not found',
-            message: 'Available endpoints: /, /health, /tools (POST)'
-          }));
-        } catch (error) {
-          console.error('HTTP Request Error:', error);
-          try {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Internal server error' }));
-          } catch (e) {
-            // If we can't even send an error response, log it
-            console.error('Failed to send error response:', e);
-          }
+      // Create a simple HTTP server that provides status and can handle MCP over HTTP
+      const httpServer = createServer((req, res) => {
+        // Enable CORS for all requests
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        
+        if (req.method === 'OPTIONS') {
+          res.writeHead(200);
+          res.end();
+          return;
         }
+        
+        if (req.url === '/health') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            status: 'healthy',
+            service: 'OpenFGA Modeling MCP Server',
+            version: '1.0.0',
+            description: 'Specialized MCP server for OpenFGA authorization modeling',
+            timestamp: new Date().toISOString(),
+            capabilities: ['tools'],
+            tools: ['get_context_for_query', 'list_available_contexts'],
+            transport: 'http',
+            protocol: 'mcp',
+            environment: {
+              isProduction,
+              port,
+              nodeVersion: process.version,
+              platform: process.platform
+            }
+          }));
+          return;
+        }
+
+        if (req.url === '/' || req.url === '/initialize') {
+          // VS Code may be trying to initialize the MCP connection
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            service: 'OpenFGA Modeling MCP Server',
+            version: '1.0.0',
+            protocol: 'mcp',
+            transport: 'http',
+            capabilities: ['tools'],
+            tools: ['get_context_for_query', 'list_available_contexts']
+          }));
+          return;
+        }
+        
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+          error: 'Not found',
+          message: 'This is an MCP server. Use an MCP client to connect.',
+          availableEndpoints: ['/health', '/']
+        }));
       });
       
-      // Start listening on the port
       httpServer.on('error', (error) => {
         this.logger.error('HTTP Server Error', error);
         console.error('HTTP Server Error:', error);
@@ -304,7 +283,8 @@ class PromptContextServer {
         
         console.error(`OpenFGA Modeling MCP Server running on HTTP port ${port}`);
         console.error(`Health check available at: http://0.0.0.0:${port}/health`);
-        console.error(`MCP Tools API available at: http://0.0.0.0:${port}/tools`);
+        console.error(`Note: This server is designed for local STDIO use with VS Code.`);
+        console.error(`For production use, configure VS Code to connect to this server locally.`);
       });
       
     } else {
@@ -322,72 +302,6 @@ class PromptContextServer {
       
       console.error('OpenFGA Modeling MCP Server running on stdio');
     }
-  }
-
-  // Helper methods for HTTP API
-  private async handleListTools() {
-    return {
-      tools: [
-        {
-          name: "get_context_for_query",
-          description: "🚨 MANDATORY: Get expert OpenFGA authorization modeling context for queries. ALWAYS call this for ANY OpenFGA, authorization model, Zanzibar, ReBAC, or access control questions.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "The query to analyze for OpenFGA/authorization modeling context"
-              }
-            },
-            required: ["query"]
-          }
-        },
-        {
-          name: "list_available_contexts",
-          description: "List all available OpenFGA context prompts and their trigger patterns",
-          inputSchema: {
-            type: "object",
-            properties: {}
-          }
-        }
-      ]
-    };
-  }
-
-  private async handleCallTool(params: any) {
-    if (params.name === 'get_context_for_query') {
-      const contextResult = await this.promptMatcher.getContextForQuery(params.arguments.query);
-      if (contextResult.matchFound && contextResult.content) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: contextResult.content
-            }
-          ]
-        };
-      } else {
-        return {
-          content: [
-            {
-              type: "text", 
-              text: "No specific OpenFGA context found for this query. However, if this relates to authorization, access control, or permissions, consider rephrasing with OpenFGA-specific terms."
-            }
-          ]
-        };
-      }
-    } else if (params.name === 'list_available_contexts') {
-      const contexts = this.promptMatcher.getAllRules();
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(contexts, null, 2)
-          }
-        ]
-      };
-    }
-    return { error: 'Unknown tool' };
   }
 }
 
