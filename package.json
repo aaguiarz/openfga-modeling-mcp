@@ -10,11 +10,21 @@
     "dev": "tsx src/index.ts",
     "watch": "tsx watch src/index.ts"
   },
-  "keywords": ["mcp", "server", "typescript", "openfga", "authorization", "zanzibar", "rebac", "access-control", "modeling"],
+  "keywords": [
+    "mcp",
+    "server",
+    "typescript",
+    "openfga",
+    "authorization",
+    "zanzibar",
+    "rebac",
+    "access-control",
+    "modeling"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^0.5.0"
+    "@modelcontextprotocol/sdk": "^1.17.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

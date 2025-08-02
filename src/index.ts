@@ -2,6 +2,7 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createServer } from 'http';
 import {
   CallToolRequestSchema,
@@ -201,70 +202,120 @@ class PromptContextServer {
     console.error(`Environment detection: isProduction=${isProduction}, PORT=${process.env.PORT}, NODE_ENV=${process.env.NODE_ENV}, RAILWAY_ENVIRONMENT=${process.env.RAILWAY_ENVIRONMENT}`);
     
     if (isProduction) {
-      // Use MCP SSE Server Transport for HTTP deployment
-      this.logger.logServerEvent('Starting MCP HTTP server for production', { 
+      // Use MCP Streamable HTTP Server Transport for HTTP deployment
+      this.logger.logServerEvent('Starting MCP Streamable HTTP server for production', { 
         port,
-        environment: process.env.RAILWAY_ENVIRONMENT || 'production' 
+        environment: process.env.RAILWAY_ENVIRONMENT || 'production',
+        protocol: '2025-03-26'
       });
       
-      // For now, create a basic HTTP server that can serve health checks
-      // The MCP SSE transport will handle the /message endpoint
-      const httpServer = createServer((req, res) => {
-        // Enable CORS
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cache-Control');
-        
-        if (req.method === 'OPTIONS') {
-          res.writeHead(200);
-          res.end();
-          return;
+      // Create HTTP server
+      const httpServer = createServer();
+      
+      // Create Streamable HTTP transport for MCP
+      const transport = new StreamableHTTPServerTransport({
+        // Generate session IDs for clients
+        sessionIdGenerator: () => {
+          const sessionId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+          this.logger.logServerEvent('New MCP session created', { sessionId });
+          return sessionId;
         }
-        
-        if (req.url === '/health') {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            status: 'healthy',
-            service: 'OpenFGA Modeling MCP Server',
-            version: '1.0.0',
-            description: 'Specialized MCP server for OpenFGA authorization modeling',
-            timestamp: new Date().toISOString(),
-            capabilities: ['tools'],
-            tools: ['get_context_for_query', 'list_available_contexts'],
-            transport: 'http-streamable',
-            protocol: 'mcp',
-            endpoint: '/message',
-            mcpUrl: `https://openfga-modeling-mcp-production.up.railway.app/message`,
-            environment: {
-              isProduction,
-              port,
-              nodeVersion: process.version,
-              platform: process.platform
+      });
+
+      // Connect MCP server to transport
+      await this.server.connect(transport);
+      
+      // Handle all HTTP requests through the transport
+      httpServer.on('request', async (req, res) => {
+        try {
+          // Enable CORS for browser clients
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cache-Control, mcp-session-id, mcp-protocol-version');
+          res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id');
+          
+          if (req.method === 'OPTIONS') {
+            res.writeHead(200);
+            res.end();
+            return;
+          }
+          
+          // Health check endpoint
+          if (req.url === '/health') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              status: 'healthy',
+              service: 'OpenFGA Modeling MCP Server',
+              version: '1.0.0',
+              description: 'Specialized MCP server for OpenFGA authorization modeling',
+              timestamp: new Date().toISOString(),
+              capabilities: ['tools'],
+              tools: ['get_context_for_query', 'list_available_contexts'],
+              transport: 'streamable-http',
+              protocol: 'mcp',
+              endpoint: '/mcp',
+              mcpUrl: `https://openfga-modeling-mcp-production.up.railway.app/mcp`,
+              environment: {
+                isProduction: isProduction,
+                port: port,
+                nodeVersion: process.version,
+                platform: process.platform,
+                railwayEnvironment: process.env.RAILWAY_ENVIRONMENT || 'unknown'
+              }
+            }));
+            return;
+          }
+          
+          // Route MCP requests to /mcp endpoint
+          if (req.url?.startsWith('/mcp')) {
+            // Parse request body for POST requests
+            let parsedBody;
+            if (req.method === 'POST') {
+              const chunks: Buffer[] = [];
+              req.on('data', (chunk) => chunks.push(chunk));
+              req.on('end', async () => {
+                try {
+                  const body = Buffer.concat(chunks).toString();
+                  parsedBody = body ? JSON.parse(body) : undefined;
+                  await transport.handleRequest(req, res, parsedBody);
+                } catch (error) {
+                  this.logger.error('Error parsing request body', error);
+                  res.writeHead(400, { 'Content-Type': 'application/json' });
+                  res.end(JSON.stringify({
+                    jsonrpc: '2.0',
+                    error: {
+                      code: -32700,
+                      message: 'Parse error'
+                    },
+                    id: null
+                  }));
+                }
+              });
+            } else {
+              // For GET and DELETE requests, no body parsing needed
+              await transport.handleRequest(req, res, parsedBody);
             }
+            return;
+          }
+          
+          // 404 for other paths
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ 
+            error: 'Not found',
+            message: 'MCP server endpoints: /health for status, /mcp for MCP communication',
+            availableEndpoints: ['/health', '/mcp']
           }));
-          return;
+          
+        } catch (error) {
+          this.logger.error('HTTP request error', error);
+          if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              error: 'Internal server error',
+              message: 'An error occurred processing the request'
+            }));
+          }
         }
-        
-        // For /message endpoint, we'll let the MCP transport handle it
-        if (req.url === '/message') {
-          // This should be handled by MCP transport, but if we get here, 
-          // provide basic SSE headers
-          res.writeHead(200, {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'Access-Control-Allow-Origin': '*'
-          });
-          res.write('data: {"jsonrpc": "2.0", "method": "ping"}\n\n');
-          return;
-        }
-        
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-          error: 'Not found',
-          message: 'MCP server - use /message endpoint for MCP communication',
-          availableEndpoints: ['/health', '/message']
-        }));
       });
       
       httpServer.on('error', (error) => {
@@ -274,20 +325,21 @@ class PromptContextServer {
       });
 
       httpServer.listen(port, '0.0.0.0', () => {
-        this.logger.logServerEvent('HTTP server started successfully', {
-          transport: 'http-streamable',
+        this.logger.logServerEvent('MCP Streamable HTTP server started successfully', {
+          transport: 'streamable-http',
           port: port,
           host: '0.0.0.0',
           pid: process.pid,
           capabilities: ['tools'],
-          mcpEndpoint: '/message'
+          mcpEndpoint: '/mcp',
+          protocolVersion: '2025-03-26'
         });
         
         console.error(`OpenFGA Modeling MCP Server running on HTTP port ${port}`);
         console.error(`Health check available at: http://0.0.0.0:${port}/health`);
-        console.error(`MCP endpoint available at: http://0.0.0.0:${port}/message`);
-        console.error(`VS Code can connect via: https://openfga-modeling-mcp-production.up.railway.app/message`);
-        console.error(`Note: This implements MCP Streamable HTTP transport for remote connections`);
+        console.error(`MCP Streamable HTTP endpoint available at: http://0.0.0.0:${port}/mcp`);
+        console.error(`VS Code can connect via: https://openfga-modeling-mcp-production.up.railway.app/mcp`);
+        console.error(`Protocol: MCP Streamable HTTP (2025-03-26)`);
       });
       
     } else {
