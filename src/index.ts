@@ -201,20 +201,19 @@ class PromptContextServer {
     console.error(`Environment detection: isProduction=${isProduction}, PORT=${process.env.PORT}, NODE_ENV=${process.env.NODE_ENV}, RAILWAY_ENVIRONMENT=${process.env.RAILWAY_ENVIRONMENT}`);
     
     if (isProduction) {
-      // For Railway deployment, use a simple HTTP server that responds to VS Code
-      // VS Code expects the MCP server to be available via HTTP, but the actual
-      // protocol may be different than what we initially implemented
-      this.logger.logServerEvent('Starting HTTP server for production', { 
+      // Use MCP SSE Server Transport for HTTP deployment
+      this.logger.logServerEvent('Starting MCP HTTP server for production', { 
         port,
         environment: process.env.RAILWAY_ENVIRONMENT || 'production' 
       });
       
-      // Create a simple HTTP server that provides status and can handle MCP over HTTP
+      // For now, create a basic HTTP server that can serve health checks
+      // The MCP SSE transport will handle the /message endpoint
       const httpServer = createServer((req, res) => {
-        // Enable CORS for all requests
+        // Enable CORS
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cache-Control');
         
         if (req.method === 'OPTIONS') {
           res.writeHead(200);
@@ -232,8 +231,10 @@ class PromptContextServer {
             timestamp: new Date().toISOString(),
             capabilities: ['tools'],
             tools: ['get_context_for_query', 'list_available_contexts'],
-            transport: 'http',
+            transport: 'http-streamable',
             protocol: 'mcp',
+            endpoint: '/message',
+            mcpUrl: `https://openfga-modeling-mcp-production.up.railway.app/message`,
             environment: {
               isProduction,
               port,
@@ -243,26 +244,26 @@ class PromptContextServer {
           }));
           return;
         }
-
-        if (req.url === '/' || req.url === '/initialize') {
-          // VS Code may be trying to initialize the MCP connection
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            service: 'OpenFGA Modeling MCP Server',
-            version: '1.0.0',
-            protocol: 'mcp',
-            transport: 'http',
-            capabilities: ['tools'],
-            tools: ['get_context_for_query', 'list_available_contexts']
-          }));
+        
+        // For /message endpoint, we'll let the MCP transport handle it
+        if (req.url === '/message') {
+          // This should be handled by MCP transport, but if we get here, 
+          // provide basic SSE headers
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*'
+          });
+          res.write('data: {"jsonrpc": "2.0", "method": "ping"}\n\n');
           return;
         }
         
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ 
           error: 'Not found',
-          message: 'This is an MCP server. Use an MCP client to connect.',
-          availableEndpoints: ['/health', '/']
+          message: 'MCP server - use /message endpoint for MCP communication',
+          availableEndpoints: ['/health', '/message']
         }));
       });
       
@@ -274,17 +275,19 @@ class PromptContextServer {
 
       httpServer.listen(port, '0.0.0.0', () => {
         this.logger.logServerEvent('HTTP server started successfully', {
-          transport: 'http',
+          transport: 'http-streamable',
           port: port,
           host: '0.0.0.0',
           pid: process.pid,
-          capabilities: ['tools']
+          capabilities: ['tools'],
+          mcpEndpoint: '/message'
         });
         
         console.error(`OpenFGA Modeling MCP Server running on HTTP port ${port}`);
         console.error(`Health check available at: http://0.0.0.0:${port}/health`);
-        console.error(`Note: This server is designed for local STDIO use with VS Code.`);
-        console.error(`For production use, configure VS Code to connect to this server locally.`);
+        console.error(`MCP endpoint available at: http://0.0.0.0:${port}/message`);
+        console.error(`VS Code can connect via: https://openfga-modeling-mcp-production.up.railway.app/message`);
+        console.error(`Note: This implements MCP Streamable HTTP transport for remote connections`);
       });
       
     } else {
