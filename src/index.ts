@@ -214,9 +214,8 @@ class PromptContextServer {
       
       // Create Streamable HTTP transport for MCP
       const transport = new StreamableHTTPServerTransport({
-        // Generate session IDs for clients
         sessionIdGenerator: () => {
-          const sessionId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+          const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
           this.logger.logServerEvent('New MCP session created', { sessionId });
           return sessionId;
         }
@@ -268,33 +267,8 @@ class PromptContextServer {
           
           // Route MCP requests to /mcp endpoint
           if (req.url?.startsWith('/mcp')) {
-            // Parse request body for POST requests
-            let parsedBody;
-            if (req.method === 'POST') {
-              const chunks: Buffer[] = [];
-              req.on('data', (chunk) => chunks.push(chunk));
-              req.on('end', async () => {
-                try {
-                  const body = Buffer.concat(chunks).toString();
-                  parsedBody = body ? JSON.parse(body) : undefined;
-                  await transport.handleRequest(req, res, parsedBody);
-                } catch (error) {
-                  this.logger.error('Error parsing request body', error);
-                  res.writeHead(400, { 'Content-Type': 'application/json' });
-                  res.end(JSON.stringify({
-                    jsonrpc: '2.0',
-                    error: {
-                      code: -32700,
-                      message: 'Parse error'
-                    },
-                    id: null
-                  }));
-                }
-              });
-            } else {
-              // For GET and DELETE requests, no body parsing needed
-              await transport.handleRequest(req, res, parsedBody);
-            }
+            // Let the transport handle the request completely
+            await transport.handleRequest(req, res);
             return;
           }
           
