@@ -2,11 +2,10 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { createServer } from 'http';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { PromptMatcher } from './prompt-matcher.js';
 import { Logger, LogLevel } from './logger.js';
@@ -37,15 +36,13 @@ class PromptContextServer {
       },
       {
         capabilities: {
-          tools: {},
-          resources: {}
+          tools: {}
         }
       }
     );
 
     this.promptMatcher = new PromptMatcher();
     this.setupToolHandlers();
-    this.setupResourceHandlers();
 
     // Error handling with logging
     this.server.onerror = (error) => {
@@ -140,63 +137,6 @@ class PromptContextServer {
     });
   }
 
-  private setupResourceHandlers() {
-    // List available resources
-    this.server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
-      const requestId = this.logger.logRequest('resources/list', request.params);
-      const rules = this.promptMatcher.getAllRules();
-      
-      const result = {
-        resources: rules.map(rule => ({
-          uri: `prompt://${rule.promptFile}`,
-          name: rule.promptFile,
-          description: rule.description,
-          mimeType: 'text/markdown'
-        }))
-      };
-
-      this.logger.logResponse(requestId, result);
-      return result;
-    });
-
-    // Read resource content
-    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      const requestId = this.logger.logRequest('resources/read', request.params);
-      const uri = request.params.uri;
-      
-      this.logger.logResourceAccess(uri, requestId);
-      
-      if (!uri.startsWith('prompt://')) {
-        const error = new Error(`Unsupported URI scheme: ${uri}`);
-        this.logger.logResponse(requestId, undefined, error);
-        throw error;
-      }
-
-      const promptFile = uri.replace('prompt://', '');
-      
-      try {
-        const content = await this.promptMatcher.loadPromptContent(promptFile);
-        
-        const result = {
-          contents: [
-            {
-              uri,
-              mimeType: 'text/markdown',
-              text: content
-            }
-          ]
-        };
-
-        this.logger.logResponse(requestId, result);
-        return result;
-      } catch (error) {
-        const wrappedError = new Error(`Failed to read resource ${uri}: ${error}`);
-        this.logger.logResponse(requestId, undefined, wrappedError);
-        throw wrappedError;
-      }
-    });
-  }
-
   private async handleGetContextForQuery(args: { query: string }, requestId: string) {
     const { query } = args;
     
@@ -253,18 +193,174 @@ class PromptContextServer {
   }
 
   async run() {
-    const transport = new StdioServerTransport();
-    this.logger.logServerEvent('Connecting to transport', { type: 'stdio' });
+    // Detect environment - use HTTP for Railway/production, STDIO for local development
+    const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
     
-    await this.server.connect(transport);
-    
-    this.logger.logServerEvent('Server started successfully', {
-      transport: 'stdio',
-      pid: process.pid,
-      capabilities: ['tools', 'resources']
-    });
-    
-    console.error('OpenFGA Modeling MCP Server running on stdio');
+    if (isProduction) {
+      // HTTP server for Railway deployment
+      this.logger.logServerEvent('Starting HTTP server for production', { 
+        port,
+        environment: process.env.RAILWAY_ENVIRONMENT || 'production' 
+      });
+      
+      // Create HTTP server with basic routing and MCP API endpoints
+      const httpServer = createServer(async (req, res) => {
+        // Enable CORS
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        
+        if (req.method === 'OPTIONS') {
+          res.writeHead(200);
+          res.end();
+          return;
+        }
+        
+        if (req.url === '/health' || req.url === '/') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            status: 'healthy',
+            service: 'OpenFGA Modeling MCP Server',
+            version: '1.0.0',
+            description: 'Specialized MCP server for OpenFGA authorization modeling',
+            timestamp: new Date().toISOString(),
+            capabilities: ['tools'],
+            tools: ['get_context_for_query', 'list_available_contexts']
+          }));
+          return;
+        }
+        
+        if (req.url === '/tools' && req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', async () => {
+            try {
+              const request = JSON.parse(body);
+              let response;
+              
+              if (request.method === 'tools/list') {
+                response = await this.handleListTools();
+              } else if (request.method === 'tools/call') {
+                response = await this.handleCallTool(request.params);
+              } else {
+                response = { error: 'Unknown method' };
+              }
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(response));
+            } catch (error) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Invalid JSON' }));
+            }
+          });
+          return;
+        }
+        
+        // 404 for other routes
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+          error: 'Not found',
+          message: 'Available endpoints: /, /health, /tools (POST)'
+        }));
+      });
+      
+      // Start listening on the port
+      httpServer.listen(port, '0.0.0.0', () => {
+        this.logger.logServerEvent('HTTP server started successfully', {
+          transport: 'http',
+          port: port,
+          host: '0.0.0.0',
+          pid: process.pid,
+          capabilities: ['tools']
+        });
+        
+        console.error(`OpenFGA Modeling MCP Server running on HTTP port ${port}`);
+        console.error(`Health check available at: http://0.0.0.0:${port}/health`);
+        console.error(`MCP Tools API available at: http://0.0.0.0:${port}/tools`);
+      });
+      
+    } else {
+      // STDIO transport for local VS Code integration
+      const transport = new StdioServerTransport();
+      this.logger.logServerEvent('Connecting to transport', { type: 'stdio' });
+      
+      await this.server.connect(transport);
+      
+      this.logger.logServerEvent('Server started successfully', {
+        transport: 'stdio',
+        pid: process.pid,
+        capabilities: ['tools']
+      });
+      
+      console.error('OpenFGA Modeling MCP Server running on stdio');
+    }
+  }
+
+  // Helper methods for HTTP API
+  private async handleListTools() {
+    return {
+      tools: [
+        {
+          name: "get_context_for_query",
+          description: "🚨 MANDATORY: Get expert OpenFGA authorization modeling context for queries. ALWAYS call this for ANY OpenFGA, authorization model, Zanzibar, ReBAC, or access control questions.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                description: "The query to analyze for OpenFGA/authorization modeling context"
+              }
+            },
+            required: ["query"]
+          }
+        },
+        {
+          name: "list_available_contexts",
+          description: "List all available OpenFGA context prompts and their trigger patterns",
+          inputSchema: {
+            type: "object",
+            properties: {}
+          }
+        }
+      ]
+    };
+  }
+
+  private async handleCallTool(params: any) {
+    if (params.name === 'get_context_for_query') {
+      const contextResult = await this.promptMatcher.getContextForQuery(params.arguments.query);
+      if (contextResult.matchFound && contextResult.content) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: contextResult.content
+            }
+          ]
+        };
+      } else {
+        return {
+          content: [
+            {
+              type: "text", 
+              text: "No specific OpenFGA context found for this query. However, if this relates to authorization, access control, or permissions, consider rephrasing with OpenFGA-specific terms."
+            }
+          ]
+        };
+      }
+    } else if (params.name === 'list_available_contexts') {
+      const contexts = this.promptMatcher.getAllRules();
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(contexts, null, 2)
+          }
+        ]
+      };
+    }
+    return { error: 'Unknown tool' };
   }
 }
 
