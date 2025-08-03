@@ -52,10 +52,28 @@ class PromptContextServer {
     };
 
     // Graceful shutdown with logging
-    process.on('SIGINT', async () => {
-      this.logger.logServerEvent('Server Shutting Down', { signal: 'SIGINT' });
-      await this.server.close();
+    const shutdown = async (signal: string) => {
+      this.logger.logServerEvent('Server Shutting Down', { signal });
+      try {
+        await this.server.close();
+        this.logger.logServerEvent('Server Closed Successfully');
+      } catch (error) {
+        this.logger.error('Error during server shutdown', error);
+      }
       process.exit(0);
+    };
+
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    
+    // Handle unhandled errors
+    process.on('unhandledRejection', (reason, promise) => {
+      this.logger.error('Unhandled Rejection', { reason, promise: promise.toString() });
+    });
+    
+    process.on('uncaughtException', (error) => {
+      this.logger.error('Uncaught Exception', error);
+      process.exit(1);
     });
 
     this.logger.logServerEvent('Server Initialized Successfully');
@@ -218,35 +236,58 @@ class PromptContextServer {
   private async handleGetContextForQuery(args: { query: string }, requestId: string) {
     const { query } = args;
     
-    this.logger.debug(`Processing query: "${query}"`, { requestId });
-    const result = await this.promptMatcher.getContextForQuery(query);
-    
-    if (!result.matchFound) {
-      this.logger.info(`No context match found for query: "${query}"`, { requestId });
+    if (!query || query.trim().length === 0) {
       return {
         content: [
           {
             type: 'text',
-            text: `No specific context found for query: "${query}"\n\nAvailable context types:\n${this.promptMatcher.getAllRules().map(rule => `- ${rule.description} (patterns: ${rule.patterns.join(', ')})`).join('\n')}`
+            text: 'Error: Query parameter is required and cannot be empty.'
           }
         ]
       };
     }
+    
+    try {
+      this.logger.debug(`Processing query: "${query}"`, { requestId });
+      const result = await this.promptMatcher.getContextForQuery(query);
+      
+      if (!result.matchFound) {
+        this.logger.info(`No context match found for query: "${query}"`, { requestId });
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `No specific context found for query: "${query}"\n\nAvailable context types:\n${this.promptMatcher.getAllRules().map(rule => `- ${rule.description} (patterns: ${rule.patterns.join(', ')})`).join('\n')}`
+            }
+          ]
+        };
+      }
 
-    this.logger.info(`Context match found for query: "${query}"`, { 
-      requestId,
-      matchedPrompt: result.rule!.promptFile,
-      description: result.rule!.description 
-    });
+      this.logger.info(`Context match found for query: "${query}"`, { 
+        requestId,
+        matchedPrompt: result.rule!.promptFile,
+        description: result.rule!.description 
+      });
 
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Context found for query: "${query}"\n\nUsing prompt: ${result.rule!.description}\n\n---\n\n${result.content}`
-        }
-      ]
-    };
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Context found for query: "${query}"\n\nUsing prompt: ${result.rule!.description}\n\n---\n\n${result.content}`
+          }
+        ]
+      };
+    } catch (error) {
+      this.logger.error(`Error processing query: "${query}"`, { error, requestId });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error processing query: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
   }
 
   private async handleListAvailableContexts(requestId: string) {
@@ -363,8 +404,18 @@ class PromptContextServer {
               // Set up handlers for this session server
               this.setupSessionServerHandlers(sessionServer);
               
+              // Add error handling for session server
+              sessionServer.onerror = (error) => {
+                this.logger.error(`Session server error [${sessionId}]`, error);
+              };
+              
               // Connect server to transport
-              await sessionServer.connect(sessionTransport);
+              try {
+                await sessionServer.connect(sessionTransport);
+              } catch (error) {
+                this.logger.error(`Failed to connect session server [${sessionId}]`, error);
+                throw error;
+              }
               
               sessionInfo = { server: sessionServer, transport: sessionTransport };
               sessionServers.set(sessionId, sessionInfo);
@@ -426,15 +477,30 @@ class PromptContextServer {
       const transport = new StdioServerTransport();
       this.logger.logServerEvent('Connecting to transport', { type: 'stdio' });
       
-      await this.server.connect(transport);
-      
-      this.logger.logServerEvent('Server started successfully', {
-        transport: 'stdio',
-        pid: process.pid,
-        capabilities: ['tools']
-      });
-      
-      console.error('OpenFGA Modeling MCP Server running on stdio');
+      try {
+        await this.server.connect(transport);
+        
+        this.logger.logServerEvent('Server started successfully', {
+          transport: 'stdio',
+          pid: process.pid,
+          capabilities: ['tools']
+        });
+        
+        console.error('OpenFGA Modeling MCP Server running on stdio');
+        
+        // Keep the process alive and handle transport errors
+        transport.onclose = () => {
+          this.logger.logServerEvent('Transport closed');
+        };
+        
+        transport.onerror = (error) => {
+          this.logger.error('Transport error', error);
+        };
+        
+      } catch (error) {
+        this.logger.error('Failed to connect to transport', error);
+        throw error;
+      }
     }
   }
 }

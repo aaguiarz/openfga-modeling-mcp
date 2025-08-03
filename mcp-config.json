@@ -1,9 +1,12 @@
 {
   "mcpServers": {
-    "openfga-modeling": {
+    "openfga-mcp": {
       "command": "node",
       "args": ["dist/index.js"],
-      "cwd": "/Users/andres.aguiar/mcp-server"
+      "cwd": "/Users/andres.aguiar/gh/vibe/mcp-server",
+      "env": {
+        "LOG_LEVEL": "INFO"
+      }
     }
   }
 }
