@@ -15,7 +15,7 @@ Add this configuration to your VS Code MCP settings:
 {
   "mcpServers": {
     "openfga-mcp": {
-      "url": "https://openfga-modeling-mcp-production.up.railway.app/mcp",
+      "url": "https://mcp.openfga.dev/mcp",
       "type": "http",
       "description": "OpenFGA Authorization Model Context Provider"
     }
@@ -51,9 +51,9 @@ The server automatically provides expert context - no `@mcp` calls needed!
 
 Our production server is hosted on Railway for reliable, instant access:
 
-- **Production URL**: https://openfga-modeling-mcp-production.up.railway.app
-- **MCP Endpoint**: https://openfga-modeling-mcp-production.up.railway.app/mcp
-- **Health Check**: https://openfga-modeling-mcp-production.up.railway.app/health
+- **Production URL**: https://mcp.openfga.dev
+- **MCP Endpoint**: https://omcp.openfga.dev/mcp
+- **Health Check**: https://mcp.openfga.dev/health
 - **Protocol**: MCP Streamable HTTP (2025-03-26)
 
 **Benefits:**
@@ -66,11 +66,11 @@ Our production server is hosted on Railway for reliable, instant access:
 ### Test Connection
 ```bash
 # Health check
-curl https://openfga-modeling-mcp-production.up.railway.app/health
+curl https://mcp.openfga.dev/health
 
 # MCP endpoint test
 curl -H "Accept: text/event-stream" \
-     https://openfga-modeling-mcp-production.up.railway.app/mcp
+     https://mcp.openfga.dev/mcp
 ```
 
 ## � **Automatic OpenFGA Detection**
