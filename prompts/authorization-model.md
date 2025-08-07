@@ -618,5 +618,6 @@ Note that:
 - You can 'extend' types that are defined in other modules and add relations to them. 
 - All .fga files now start with 'module <module name>' even the 'core' module. They do not start with schema declaration, that's in the `fga.mod` file.
 
-IMPORTANT: If the model that you are creating has more than 8 types, and they belong to different application areas, always create separate modules. Do not create a single model file.
+IMPORTANT: Only use modules if you are EXPLICITLY ASKED to create modules.
+
 
