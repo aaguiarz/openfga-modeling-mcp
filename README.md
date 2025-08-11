@@ -1,15 +1,24 @@
 # OpenFGA Modeling MCP Server
 
-A specialized MCP (Model Context Protocol) server that provides expert-level OpenFGA authorization modeling guidance. Get instant access to comprehensive OpenFGA knowledge directly in VS Code through our hosted Railway deployment.
+A specialized MCP (Model Context Protocol) server that provides expert-level OpenFGA authorization modeling guidance. Get instant access to comprehensive OpenFGA knowledge directly in VS Code.
 
-## 🚀 **Quick Start - Use Immediately**
+## 🚀 **Quick Start**
 
 **No installation required!** Connect directly to our hosted server:
 
-### 1. **Configure Your MCP Client**
+### 1. **Pre-requisites**
+
+- Install the [Visual Studio Code OpenFGA Extension](https://marketplace.visualstudio.com/items?itemName=openfga.openfga-vscode). This will help Copilot validate its output by just monitoring the warnings emitted by the editor.
+- Install the [OpenFGA CLI](https://github.com/openfga/cli). It will let the Agent run tests, verify the output, and fix them if needed.
+    ```
+    brew install openfga/tap/fga
+    ```
+- Enable Agent mode in Copilot. We had better results with Claude Sonnet 4 than with any other LLM.
+
+### 2. **Configure Your MCP Client**
 
 #### VS Code MCP Extensions
-Add this configuration to your VS Code MCP settings:
+Add this configuration to your VS Code MCP settings, or run the 'MCP Add Server' command and use the `https://mcp.openfga.dev/mcp` URL:
 
 ```json
 {
@@ -23,7 +32,7 @@ Add this configuration to your VS Code MCP settings:
 }
 ```
 
-### 2. **Start Using**
+### 3. **Start Using**
 
 Some possible prompts:
 
@@ -43,25 +52,15 @@ The server automatically provides expert context - no `@mcp` calls needed!
 - **🚨 OpenFGA Expert Context**: Mandatory guidance for all authorization modeling questions
 - **🔍 Intelligent Detection**: Automatically recognizes 31+ OpenFGA-specific patterns
 - **📚 Expert Knowledge**: 600+ lines of comprehensive OpenFGA modeling documentation
-- **⚡ Instant Access**: Cloud-hosted on Railway for zero-setup usage
-- **🛠️ Production Ready**: TypeScript implementation with comprehensive logging
 - **🔧 VS Code Native**: Seamless GitHub Copilot integration
 
-## 🌐 **Railway Deployment**
-
-Our production server is hosted on Railway for reliable, instant access:
+## MCP Server Hosting
 
 - **Production URL**: https://mcp.openfga.dev
 - **MCP Endpoint**: https://omcp.openfga.dev/mcp
 - **Health Check**: https://mcp.openfga.dev/health
 - **Protocol**: MCP Streamable HTTP (2025-03-26)
 
-**Benefits:**
-- ✅ Zero-downtime deployments
-- ✅ Automatic SSL/HTTPS
-- ✅ CORS enabled for browser clients
-- ✅ High availability with load balancing
-- ✅ Always up-to-date with latest OpenFGA guidance
 
 ### Test Connection
 ```bash
@@ -73,7 +72,7 @@ curl -H "Accept: text/event-stream" \
      https://mcp.openfga.dev/mcp
 ```
 
-## � **Automatic OpenFGA Detection**
+## **Automatic OpenFGA Detection**
 
 The server automatically triggers expert context for queries containing:
 
