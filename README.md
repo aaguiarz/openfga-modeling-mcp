@@ -8,6 +8,7 @@ A specialized MCP (Model Context Protocol) server that provides expert-level Ope
 
 ### 1. **Pre-requisites**
 
+- Enable Copilot in Visual Studio Code.
 - Install the [Visual Studio Code OpenFGA Extension](https://marketplace.visualstudio.com/items?itemName=openfga.openfga-vscode). This will help Copilot validate its output by just monitoring the warnings emitted by the editor.
 - Install the [OpenFGA CLI](https://github.com/openfga/cli). It will let the Agent run tests, verify the output, and fix them if needed.
     ```
