@@ -2,6 +2,8 @@
 
 A specialized MCP (Model Context Protocol) server that provides expert-level OpenFGA authorization modeling guidance. Get instant access to comprehensive OpenFGA knowledge directly in VS Code.
 
+You can see it in action in [this YouTube video](https://www.youtube.com/watch?v=JNBtf-1NrPM).
+
 ## 🚀 **Quick Start**
 
 **No installation required!** Connect directly to our hosted server:
